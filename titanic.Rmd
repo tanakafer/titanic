@@ -1,0 +1,524 @@
+---
+title: 'Tipología y ciclo de vida de los datos'
+subtitle: 'Práctica 2'
+author: "Fernando Rodríguez López"
+date: "13/5/2019"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: true
+  pdf_document:
+  md_document:
+    variant: markdown_github
+geometry: left=3cm,right=3cm,top=2cm,bottom=2cm
+#bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(VIM)
+library(mice)
+library(randomForest)
+library(ggpubr)
+library(caret)
+```
+
+# Descripción del dataset
+
+El dataset seleccionada es el del hundimiento del titanic de Kaggle [https://www.kaggle.com/c/titanic/data]
+
+El hundimiento del **RMS Titanic** es una de los hundimientos de barcos más famosos de la historia. El incidente
+ocurrió entre el día 14 y 15 de abril de 1912. Durante su viaje inaugural entre Southampton y Nueva York, el transatlántico británico cochó contra un iceberg en el oceano Atlántico frente a las costas de Terranova.
+Tras el choque el translatlántico se hundío y murieron 1502 personas de 2224 pasajeros y tribulates.
+
+Esta tragedia ha sido una de las mayores tragedias naúticas en tipo de paz. Las causas del número de fallecidos fueron consecuencia de la falta de botes salvavidas. Pero además, en diferentes estudios se ha visto que la suerte de los supervivientes estaban realionadas con distintas características de los viajes y tripulantes. 
+
+En el siguiente estudio se pretende ver que tipo de personas tuvieron la suerte de sobrevivir.  Teniendo en cuenta su género, clase social y edad. 
+
+Los datos se han dividido en dos grupos:
+
+- **El conjunto de entrenamiento** usado para crear el modelo de entrenamiento para un modelo. Para este grupo se le aporta la clase de salida (también conocidad como *ground truth*) 
+- **El conunto de test** usado para comprobar lo bien que predice el modelo. En este grupo no se aporta la clase de salida. Sino que este grupo es utilizado para verificar los bien que modelo predice si un pasajero habría sobrevivido o no dependiendo de sus propiedades.
+
+## Conjunto de entrenamiento 
+
+El conjunto de entrenamiento es un fichero csv en código ASCII que consta de los siguiente atributos.
+Este fichero incluye las cabeceras dentro del fichero y los campos están separados por ",".
+
+|Variable         | Descripción         |Valores              |
+|-----------------|---------------------|---------------------|
+|PassengerId      |Identificador de pasajero|                     | 
+|Survived 	      |Sobrevivió           |	0 = No, 1 = Sí      |
+|pclass           |Tipo del billete 	  |1 = Primera clase, 2 = Segunda Clase, 3 = Tercera Clase|
+|Name             |Nombre               |                     |
+|Sex              |Género           	  |male = Hombre, female= Mujer|
+|Age              |Edad en Años         |                     | 	
+|Sibsp            |Número de familiares a bordo (hermanos, pareja)|                     | 	
+|Parch            |Número de famliares a bordo (padres e hijos)	|                     | 	
+|Ticket           |Número del billete	|                     |  	
+|Fare             |Precio del billete|                     |  	
+|Cabin            |Número de cabina |                     |  
+|Embarked 	      |Puerto de embarque|C = Cherbourg, Q = Queenstown, S = Southampton|
+
+## Conjuto de test
+
+El conjuto de tes también es un fichero csv en código ASCII que consta de los siguientes atributos
+Este fichero incluye las cabeceras dentro del fichero y los campos están separados por ",".
+
+| Variable    | Descripción                                  | Valores                                                   |
+|-------------|----------------------------------------------|-----------------------------------------------------------|
+| PassengerId | Identificador del pasajero                   |                                                           |
+| Pclass      | Tipo del billete                             | 1 = Primera clase,  2 = Segunda Clase,  3 = Tercera Clase |
+| Name        | Nombre                                       |                                                           |
+| Sex         | Género                                       | male = Hombre,  female= Mujer                             |
+| Age         | Edad en Años                                 |                                                           |
+| SibSp       | Número de familiares a bordo (hermanos, pareja)       |                                                  |
+| Parch       | Número de famliares a bordo (padres e hijos) |                                                           |
+| Ticket      | Número del billete                           |                                                           |
+| Fare        | Precio del billete                           |                                                           |
+| Cabin       | Número de cabina                             |                                                           |
+| Embarked    | Puerto de embarque                           | C = Cherbourg, Q = Queenstown, S = Southampton            |
+
+
+Para una mejor compresión del dataset tenemos que tener encuenta las siguientes consideraciones
+
+**Age**: la edad en caso de viajeros que no superen más de un año es fraccional.
+
+**SibsP**: Determina el númeor de familiares del tipo hermanos y pareja
+  - Hermanos: incluye hermanos, hermanas, hermanástros y hermanástras
+  - Pareja: esposos y esposas. Los novios y amantes fueron descartados
+**Parch**: 
+  - Padre:  madre y padre
+  - Hijo: hijos, hijas, hijastros e hijastras.
+
+# Integración y selección de los datos de interés a analizar
+
+El primer paso que vamos a realizar es la carga de ambos ficheros  en un mismo dataframe. 
+Como podemos comprobar los dos ficheros, tienen los mismos campos exceptuando  la clase de salida, que en el caso de conjunto test le asignamos el valor TBD. Ya que es el objeto de la competición de Kaggle.
+Pero uniendo los dos ficheros en un dataframe único, podemos realizar un análisis y limpienza única con toda la población, observando datos perdidos, valores extremos y otros posibles errores.
+
+Hay que tener en cuenta que el archivo csv debe estar en el directorio "kaggle" dentro de nuestro directorio de trabajo. En caso contrario hay que especificar la ruta absoluta al archivo.
+
+```{r Carga, message=FALSE, warning=FALSE}
+# Leemos los datos de entrenamiento
+train <- read.csv("./kaggle/train.csv")
+# Leemos los datos de test
+test <- read.csv("./kaggle/test.csv")
+
+# Variable con las propiedades no incluyendo la clase salida
+properties = colnames(test)
+# Variable con la clase salida
+class = c("Survived")
+
+# Creamos un dataframe unico con todos los datos
+titanic_raw <- bind_rows(train, test) 
+
+# Creamos un dataframe donde realizamos las operaciones
+titanic <- titanic_raw
+
+```
+
+Realizamos una comprobación visual, para ver si se han cargado los datos con las propiedades que hemos determinado en el apartado anterior.
+
+```{r}
+# Echamos un vistazo a los datos
+str(titanic)
+```
+
+Observamos que hay 1309 que son la suma de los 418 elementos de test más los 891 elementos de entrenamiento que corresponde con la información que nos aporta kaggle.
+
+Todas estas observaciones tiene 12 propiedades, que corresponde a 11 atributos más la clase de salidad *Survived* donde los datos de test tendrían que tener el valor de NA.
+
+Pero pasamos a comprobarlo.
+
+```{r}
+
+str(titanic %>% filter(is.na(Survived)))
+#Comprobamos  que los PassengerID son los mismos en el dataframe titanic con Survived a NA y los de test
+print("___________________")
+print( "Diferencias")
+print("___________________")
+str(setdiff(test %>% select("PassengerId"), titanic %>% filter(is.na(Survived)) %>% select("PassengerId") ))
+
+```
+
+Como vemos el número de observaciones con Survived igual a NA corresponde al número de test y además no hay diferencias de los códigos de los pasajeros (PassengerId). Por lo que los NA corresponde a los datos del conjunto de test.
+
+Así que hemos realizado correctamente la integración de los dos ficheros csv.
+Remplazamos el valor NA por TBD para crear la variable tipo factor
+```{r factorized_Survice}
+titanic$Survived[is.na(titanic$Survived)] <- "TBD"
+titanic$Survived <- as.factor(titanic$Survived)
+levels(titanic$Survived)
+```
+
+
+
+Ahora procedemos ha imprimir un resumen del dataframe para estudiar nuestra propiedades
+```{r}
+# Resumen de las propiedades sin contar la clase de salida
+summary(titanic[properties])
+```
+El campo **PassengerId** es únicamente para identificar a cada uno de los pasajeros. Por lo que no formará parte de ninguno de nuestro estudios. Pero lo asignamos como el valor de **id** de nuestro Dataframe.
+```{r}
+# Asignamos el identificador de dataframe con los valores de PassengerId
+rownames(titanic) <- titanic$PassengerId
+# Eliminamos de la variable properties la variable
+#titanic$PassengerId <- NULL
+properties <- properties[!properties %in% "PassengerId"]
+```
+
+
+Vemos que la propiedad Pclass es numérica y debería de ser factor ya que no representa una categoricación numérica, además no tiene ningún valor perdido.
+
+```{r}
+titanic$Pclass <- factor(titanic$Pclass)
+# Comprobamos los valores de la clase
+levels(titanic$Pclass)
+```
+
+Revisando visualmente el campo **Name**(nombre) observamos que están los títulos de cada uno de los viajeros. Es decir si son señores, señoras, señorítas. Lo cual podría ser variable diferenciadora para determinar si se puede salvar o no.
+
+Para ellos sacaremos el Título según los nombres
+
+```{r}
+# Cogemos los títulos según los nombres
+titanic$Title <- gsub('(.*, )|(\\..*)', '', titanic$Name)
+# Presentamos los anteriores títulos enfrentados al género
+table(titanic$Sex, titanic$Title)
+```
+
+Procedemos a convertir los títulos obtenidos en un grupo más reducido
+```{r}
+# Titulos que vamos a convertir a Mr
+toMr_title  <- c ('Don', 'Major', 'Capt', 'Jonkheer', 'Rev', 'Col', 'Sir')
+# Convertirmos dichos títulos a Mr
+titanic$Title[titanic$Title %in% toMr_title]  <- 'Mr'
+# Titulos que vamos a convertir a Mrs
+toMrs_title  <- c('the Countess', 'Mme', 'Dona', 'Lady')
+# Convertirmos dichos títulos a Mr
+titanic$Title[titanic$Title %in% toMrs_title]  <- 'Mrs'
+# Titulos que vamos a convertir a Miss
+toMiss_title  <- c('Mlle', 'Ms')
+# Convertirmos dichos títulos a Miss
+titanic$Title[titanic$Title %in% toMiss_title]  <- 'Miss'
+
+# Convertimos los Dr - female en Mrs
+titanic$Title[(titanic$Title %in% "Dr") & titanic$Sex == "female"] <- "Mrs"
+# Convertimos los Dr - male en Mr
+titanic$Title[(titanic$Title %in% "Dr") & titanic$Sex == "male"] <- "Mr"
+
+# Añadimos  el atributo Title
+properties <- append(properties, "Title")
+# Show title counts by sex again
+table(titanic$Sex, titanic$Title)
+
+# Convertimos el campo en factor
+
+titanic$Title <- as.factor(titanic$Title)
+```
+Del propio campo **Name** podemos obtener el apellido para determinar la familia, el cual podría ser un atrituto  útil para los posibles modelos.
+
+```{r surname}
+titanic$Surname <- sapply(titanic$Name,  
+                      function(x) strsplit(x, split = '[,.]')[[1]][1])
+
+```
+
+Pero eliminamos el campos **Name** que no parece útil para ninguno de los posibles modelos.
+
+```{r remove_Name}
+# Eliminamos de la variable properties la variable
+#titanic$Name <- NULL
+properties <- properties[!properties %in% "Name"]
+```
+
+El campo **Sex**(género) podría ser útil para nuestros modelos por lo que lo mantenemos.
+El campo **Age**(edad) podría ser útil para nuestros modelos por lo que lo mantenemos, pero vemos que tiene valores perdídos que estudiaremos en el siguiente apartado.
+Los dos siguientes atributos **Sibsp**(hermanos, pareja) y **Parch** (padres e hijos)	pueden ser interesantes para nuestros modelos, pero también podría ser válido para nuestros modelos la unión de los dos en un nuevo campo que sea **Familiy**.
+
+```{r}
+titanic$Family <- titanic$SibSp + titanic$Parch + 1
+properties <- append(properties, "Family")
+
+```
+
+
+El campo *Ticket* está como tipo characters, aunque no parece un campo útil, para nuestro modelo, pero vamos a convertirlo en factor, para ver si puede ser útil.
+
+```{r Factorize_Ticket}
+titanic$Ticket <- as.factor(titanic$Ticket)
+# Hacemos un sumary
+summary(titanic)
+titanic %>% 
+    group_by(Ticket) %>% 
+    count()
+
+```
+Como podemos observar de los 1309 hay 1261 tipos distintos de Tickets, por lo tanto no parece un campo muy relevante y lo elimnamos de nuestro dataframe
+```{r remove_Ticket}
+# Eliminamos de la variable properties la variable
+#titanic$Ticket <- NULL
+properties <- properties[!properties %in% "Ticket"]
+```
+
+EL campo **Fare**(precio del billete) a priori parece interesante para un modelo de predicción de si el pasajero sobrevive o no. Vemos que tiene un valor perdido que también veremos en el próximo aparatado.
+
+EL campo **Cabin** (nombre del camarote) al igual que pasaba con Ticket no parece muy interesante para los modelos, pero vamos a factorizar.
+
+```{r Factorize_Cabin}
+titanic$Cabin <- as.factor(titanic$Cabin)
+# Hacemos un sumary
+summary(titanic)
+titanic %>% 
+    group_by(Cabin) %>% 
+    count() 
+   
+    
+
+```
+En el resumen vemos que hay 271 tipos de cabinas, por lo que parecería interesante ya que se agruparían muchos pasajeros, pero uno de los grupos contiene 1014 pasajeros. Por esto parece que no es muy interesante y lo eliminamos del dataframe.
+```{r remove_Cabin}
+# Eliminamos de la variable properties la variable
+#titanic$Cabin <- NULL
+properties <- properties[!properties %in% "Cabin"]
+```
+
+El último campo **Embarked**(puerto de embarque) es de tipo texto y lo pasamos a factor para ver si puede resultar interesante.
+
+```{r Factorize_Embarked}
+titanic$Embarked <- as.factor(titanic$Embarked)
+# Hacemos un sumary
+summary(titanic %>% select(properties))
+titanic %>% 
+    group_by(Embarked) %>% 
+    count() 
+   
+    
+
+```
+
+De la agrupación vermos que tenemos 4 niveles y uno de ello es valor perdido, que estudiaremos en el próximo apartado.
+
+
+# Limpieza de los datos.
+
+## Valores vacios o que continen 0
+
+Como hemos visto en el apartado anterior  de nuestras propiedades numéricas tenemos valores nulos en **Age** y **Fare** y de tipo factor en *Embarked*.
+
+### Valor *Fare* con valor NA
+Buscamos el único valor que contiene NA en su propiedad *Fare*
+```{r}
+titanic %>% filter(is.na(titanic$Fare))
+```
+
+De este pasajero observamos que su embarque fué en *Southampton* (‘S’) y es de tercera clase. 
+
+```{r}
+
+ggplot(titanic[titanic$Pclass == '3' & titanic$Embarked == 'S', ], 
+  aes(x = Fare)) +
+  # Función de densidad de los valores de Fare filtrados
+  geom_density(fill = '#99d6ff', alpha=0.4, na.rm=T) + 
+  # Dibujamos la recta de la mediana
+  geom_vline(aes(xintercept=median(Fare, na.rm=T)),
+    colour='red', linetype='dashed', lwd=1) 
+```
+
+De esta visaulización vemos que la mayoría de los valores se concentran cerca de la mediana, por lo que parece razonable sustituir el valor perdido con el valor de la mediana del grupo que corresponde con la misma clase y el mismo embarque.
+
+```{r}
+# Reemplazamos el valor perdido con el valor de la mediana
+titanic$Fare[1044] <- median(titanic[titanic$Pclass == '3' & titanic$Embarked == 'S', ]$Fare, na.rm = TRUE)
+sprintf ("Valor Fare reemplazado: %s", titanic$Fare[1044])
+```
+
+### Valor *Age* con valor NA
+
+
+Como hemos visto los valores perdidos del atributo *Age* es de 263 que frente al total suponen un 20% que es una gran cantidad de valores perdidos.
+
+```{r}
+summary(titanic %>% select(properties) %>% filter(is.na(Age)))
+```
+
+Al ser un gran úmnero de valores, no podemos permitirnos elmininar dichos datos.
+
+Para ello tenemos que imputar los posibles valores. Para ellos utilizaremos dos modelos uno el K vecinos y otro con un Random-forest según la biblioteca mice orientada para obtener rellenear valores vacios.
+
+Primero con el KNN de la libería VIM.
+
+```{r missing_knn, message=FALSE, warning=FALSE}
+
+# La función kNN genera una nueva columna lógica que
+# indica si se han imputado valores o no
+mod_knn <- kNN(titanic, variable = ("Age"))
+
+```
+
+Con un Random Forest con la librería mice.
+
+```{r message=FALSE, warning=FALSE}
+
+
+set.seed(129)
+mice_mod <- mice(titanic[, !names(titanic) %in% c('PassengerId','Name','Ticket','Cabin','Survived')], method='rf') 
+mice_output <- complete(mice_mod)
+```
+
+Después de obtener los valores, con los dos métodos, representamos la función densidad, y la comparamos con los datos originales. Para valorar, como varía la función densidad de los datos con las imputaciones realizadas.
+
+```{r}
+
+# Función densidad de la Edad con los datos original
+Age_original <- ggplot(titanic, 
+  aes(x = Age)) +
+  # Función de densidad de los valores de Age filtrados
+  geom_density(fill = '#99d6ff', alpha=0.4, na.rm=T) + 
+  # Dibujamos la recta de la mediana
+  geom_vline(aes(xintercept=median(Age, na.rm=T)),
+    colour='red', linetype='dashed', lwd=1) 
+# Función densidad de la Edad con los datos completados con Knn
+Age_knn <- ggplot(mod_knn, 
+  aes(x = Age)) +
+  # Función de densidad de los valores de Age filtrados
+  geom_density(fill = '#99d600', alpha=0.4, na.rm=T) + 
+  # Dibujamos la recta de la mediana
+  geom_vline(aes(xintercept=median(Age, na.rm=T)),
+    colour='red', linetype='dashed', lwd=1) 
+
+# Función densidad de la Edad con los datos completados con Random-Forest según la libería mice
+
+Age_rf <- ggplot(mice_output, 
+  aes(x = Age)) +
+  # Función de densidad de los valores de Age filtrados
+  geom_density(fill = '#ff0f55', alpha=0.4, na.rm=T) + 
+  # Dibujamos la recta de la mediana
+  geom_vline(aes(xintercept=median(Age, na.rm=T)),
+    colour='red', linetype='dashed', lwd=1) 
+
+figure <- ggarrange(Age_original, Age_knn, Age_rf,
+                    labels = c("Original", "Knn", "Random-Forest"),
+                    ncol = 1, nrow =3)
+figure
+
+         
+```
+
+De la gráficas, observamos como el método **Random-Forest** obtiene una gráfica de densidad de la Edad muy parecida a la muestra original sin tener en cuenta los valores perdidos y la mediana no varía
+Sin embargo, con el método **Knn** obtenemos una gráfica más distorsionada e incluso la mediana se desplaza un poco.
+Por lo que procedemos a remplazar en nuestro dataframe los datos obtenidos con el método **Random-Forest** en los valores perdidos
+
+
+```{r replace_RF}
+# Reemplazamos los datos de la edad en nuestro dataframe original
+titanic[,"Age"] <- mice_output$Age
+```
+### Valor *Embarked* con valor vacio
+Presentamos los valores con embarque vacio
+```{r empty_Embarked}
+titanic %>% filter(Embarked == "")
+```
+Observamos que las instancias que tienen el embarque vacio son de la Clase 1 y tienen un precio de embarque de 80. 
+Para ver como se distribuyen los precios de los embarques representamos los *boxplot* de la población según los embarques, descartando los elementos que tienen embarque vacio
+
+```{r}
+# Eliminamos de la población los que tiene embarque vacio
+embark_fare <- titanic %>%
+  filter(PassengerId != 62 & PassengerId != 830 & Pclass==1)
+# Repesentamos los boxplot y una línea roja con el valor del precio del pasaje de los valores perdidos
+ggplot(embark_fare, aes(x = Embarked, y = Fare)) +
+  geom_boxplot() +
+  geom_hline(aes(yintercept=80), 
+    colour='red', linetype='dashed', lwd=2) 
+```
+
+
+## Identificación y tratamiento de valores externos
+
+Para detectar la presencia de valores atípicos examinaremos primero el resumen de los cinco números de Tukey, donde podremos observar un análisis descriptivo de los datos
+De este resumen detectaremos si la media y la mediana están muy separadas, para analizar dichas variables más en detalle posteriormente.
+Para obtener los datos sólo utilizaremos las variables numéricas **Age**, **SibSp**, **Parch**, **Fare** y la calculada **Family**.
+
+```{r summary_outliers}
+numeric_properties <- c ("Age", "SibSp", "Parch", "Fare", "Family")
+summary(titanic %>% select(numeric_properties))
+```
+ Los cinco números también  se representan gráficamente con **boxplot**
+ 
+```{r boxplot_numeric}
+Age_boxplot <- ggplot(titanic, aes(x="", y=Age) ) +
+  geom_boxplot() 
+SibSp_boxplot <- ggplot(titanic, aes(x="", y=SibSp)) +
+  geom_boxplot() 
+Parch_boxplot <- ggplot(titanic, aes(x="", y=Parch)) +
+  geom_boxplot() 
+Family_boxplot <- ggplot(titanic, aes(x="", y=Family)) +
+  geom_boxplot() 
+Fare_boxplot <- ggplot(titanic, aes(x="", y=Fare)) +
+  geom_boxplot() 
+
+boxplots <- ggarrange(Age_boxplot, SibSp_boxplot, Parch_boxplot, Family_boxplot, Fare_boxplot,
+                   
+                    ncol = 2, nrow =3)
+boxplots
+```
+ 
+```{r}
+Age_boxplot
+```
+
+De la gráfica, observamo que la mayoría de la población se encuentra entre 0 y 60 años aproximadamente. Pero hay pasajeros que se encuentra entre los 60 y los 80 años. Por lo que no parece que hay errores tipográficos.
+
+Pero ese grupo de valores extremos entre 60 y 80, pueden 
+
+```{r}
+
+Age_normalized<- log10(titanic$Age +1 )
+Age_normalized_boxplot <- ggplot(titanic, aes(x="", y=Age_normalized) ) +
+  geom_boxplot() 
+Age_normalized_boxplot
+```
+
+```{r}
+Age_normalized_density <- ggplot(titanic, 
+  aes(x = Age_normalized)) +
+  # Función de densidad de los valores de Age filtrados
+  geom_density(fill = '#ff0f55', alpha=0.4, na.rm=T)
+Age_normalized_density
+```
+
+
+```{r}
+Fare_boxplot
+```
+De las observación de las gráficas, no podemos observar valores extremos que se puedan considerar erroneos
+
+# Código
+
+
+El código se encuentra disponible en
+
+[https://github.com/tanakafer/titanic](https://github.com/tanakafer/titanic)
+
+# Dataset
+
+
+# Contribuciones
+
+| Contribuciones | Firma |
+|----------------|-------|
+| Investigación previa| [FRL](https://github.com/tanakafer)|
+| Redacción de las respuestas | [FRL](https://github.com/tanakafer)|
+| Desarrollo código | [FRL](https://github.com/tanakafer) |
+
+# References
+
