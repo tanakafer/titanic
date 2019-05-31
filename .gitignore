@@ -117,3 +117,4 @@ venv.bak/
 .DS_Store
 .RData
 .Rhistory
+titanic_files
