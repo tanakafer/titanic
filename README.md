@@ -6,7 +6,7 @@ El objetivo de esta actividad será el tratamiento del dataset Titanic: Machine 
 
 El código se encuentra disponible en
 
-[https://github.com/tanakafer/camaraBaja](https://github.com/tanakafer/camaraBaja)
+[https://github.com/tanakafer/titanic](https://github.com/tanakafer/titanic)
 
 # Licencia
 
@@ -30,11 +30,11 @@ Bajo las condiciones siguientes:
 
 # Estructura de Ficheros y Carpetas
 
-**README.mdd**: Este Fichero
+**README.md**: Este Fichero
 
 **titanic.Rmd**: Fichero de Rstudio  donde se realiza la práctica
 
-**titanic.pdf**: Fichero de respuesta  en pdf generado a apartir del fichero titanic.Rmd
+**titanic.pdf**: Fichero de respuesta  en pdf generado a apartir del fichero titanic.Rmd.
 
 **titanic.html**: Fichero de respuesta  en html generado a apartir del fichero titanic.Rmd
 
@@ -42,12 +42,17 @@ Bajo las condiciones siguientes:
 
 **kaggle**: Directorio que contiene los ficheros fuentes de Kaggle y donde se almacenan los resultados
 
-
   - **train.csv**: Fichero origen con los datos de entrenamiento
 
   - **test.csv**: Fichero origen con los datos de test.
 
-**reference.bib**: Fichero de referencias para incluir en el fichero de rstudio.  
+  - **output_submission.csv**: Fichero con el resultado de nuestro modelo y para entregar a kaggle
+
+  - **output**: Fichero con todos los valores utilizados en los modelos y el resultado. El campo type tiene dos valores "train", para las muestras utilizadas para el entrenamiento y "result" para el resultado utilizado el modelo final **Random-forest**.
+
+  - **gender_submission.csv**: Fichero de ejemplo de la entrega en kaggle
+
+**references.bib**: Fichero de referencias para incluir en el fichero de rstudio.  
 
 
 # Contribuciones

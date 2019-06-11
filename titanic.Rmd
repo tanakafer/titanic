@@ -13,14 +13,21 @@ output:
     toc_float: true
     number_sections: true
 geometry: left=3cm,right=3cm,top=2cm,bottom=2cm
-#bibliography: references.bib
+bibliography: references.bib
 ---
+---
+nocite: | 
+  @large_families
+  @basic_features
+  @exploring_titanic
+  @data_cleaning
+...
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r message=FALSE, warning=FALSE, include=FALSE}
+```{r  load_Library, message=FALSE, warning=FALSE, include=FALSE}
 library(dplyr)
 library(ggplot2)
 library(VIM)
@@ -28,9 +35,10 @@ library(mice)
 library(randomForest)
 library(ggpubr)
 library(caret)
-library(e1071)
 library(nortest)
-library(dummies)
+library(plotROC)
+library(pROC)	
+library(mlbench)
 ```
 
 # Descripción del dataset
@@ -45,10 +53,10 @@ Esta tragedia ha sido una de las mayores tragedias naúticas en tipo de paz. Las
 
 En el siguiente estudio se pretende ver que tipo de personas tuvieron la suerte de sobrevivir.  Teniendo en cuenta su género, clase social y edad. 
 
-Los datos se han dividido en dos grupos:
+Los datos nos los dan divididos en dos grupos:
 
 - **El conjunto de entrenamiento** usado para crear el modelo de entrenamiento para un modelo. Para este grupo se le aporta la clase de salida (también conocidad como *ground truth*) 
-- **El conunto de test** usado para comprobar lo bien que predice el modelo. En este grupo no se aporta la clase de salida. Sino que este grupo es utilizado para verificar los bien que modelo predice si un pasajero habría sobrevivido o no dependiendo de sus propiedades.
+- **El conjunto de test** Normalmente usado para comprobar lo bien que predice el modelo, pero como no se aporta la clase de salida.No podemos utilizarlo para la comprobación del modelo, sino que se  utiliza como respuesta para la competición de kaggle.
 
 ## Conjunto de entrenamiento 
 
@@ -72,7 +80,7 @@ Este fichero incluye las cabeceras dentro del fichero y los campos están separa
 
 ## Conjuto de test
 
-El conjuto de tes también es un fichero csv en código ASCII que consta de los siguientes atributos
+El conjuto de test también es un fichero csv en código ASCII que consta de los siguientes atributos
 Este fichero incluye las cabeceras dentro del fichero y los campos están separados por ",".
 
 | Variable    | Descripción                                  | Valores                                                   |
@@ -94,7 +102,7 @@ Para una mejor compresión del dataset tenemos que tener encuenta las siguientes
 
 **Age**: la edad en caso de viajeros que no superen más de un año es fraccional.
 
-**SibsP**: Determina el númeor de familiares del tipo hermanos y pareja
+**SibsP**: Determina el número de familiares del tipo hermanos y pareja
   - Hermanos: incluye hermanos, hermanas, hermanástros y hermanástras
   - Pareja: esposos y esposas. Los novios y amantes fueron descartados
 **Parch**: 
@@ -104,13 +112,13 @@ Para una mejor compresión del dataset tenemos que tener encuenta las siguientes
 # Integración y selección de los datos de interés a analizar
 
 El primer paso que vamos a realizar es la carga de ambos ficheros  en un mismo dataframe. 
-Como podemos comprobar los dos ficheros, tienen los mismos campos exceptuando  la clase de salida, que en el caso de conjunto test no existe. Ya que es el objeto de la competición de Kaggle.
+Como podemos comprobar los dos ficheros, tienen los mismos campos exceptuando la clase de salida, que en el caso de conjunto test no existe. Ya que es el objeto de la competición de Kaggle.
 Pero uniendo los dos ficheros en un dataframe único, podemos realizar un análisis y limpieza única con toda la población, observando datos perdidos, valores extremos y otros posibles errores.
 Una vez realizado el trabajo de limpieza, podeos volver a separar para aplicar los modelos.
 
 Hay que tener en cuenta que el archivo csv debe estar en el directorio "kaggle" dentro de nuestro directorio de trabajo. En caso contrario hay que especificar la ruta absoluta al archivo.
 
-```{r Carga, message=FALSE, warning=FALSE}
+```{r data_load, message=FALSE, warning=FALSE}
 # Leemos los datos de entrenamiento
 train <- read.csv("./kaggle/train.csv")
 # Leemos los datos de test
@@ -130,7 +138,7 @@ titanic <- titanic_raw
 
 Realizamos una comprobación visual, para ver si se han cargado los datos con las propiedades que hemos determinado en el apartado anterior.
 
-```{r}
+```{r early_view}
 # Echamos un vistazo a los datos
 str(titanic)
 ```
@@ -143,11 +151,11 @@ Todas estas observaciones tiene 12 propiedades, que corresponde a 11 atributos m
 
 Pero pasamos a comprobarlo.
 
-```{r message=FALSE}
+```{r na_survived_view, message=FALSE}
 # Número de instancias con el valor Survived Nulo
 str(titanic %>% filter(is.na(Survived)))
 ```
-```{r message=FALSE}
+```{r check_survived, message=FALSE}
 #Comprobamos  que los PassengerID son los mismos en el dataframe titanic con Survived a NA y los de test
 str(setdiff(test %>% select("PassengerId"), titanic %>% filter(is.na(Survived)) %>% select("PassengerId") ))
 ```
@@ -167,14 +175,14 @@ levels(titanic$Survived)
 
 Ahora procedemos ha imprimir un resumen del dataframe para estudiar nuestra propiedades
 
-```{r}
+```{r firs_summary}
 # Resumen de las propiedades sin contar la clase de salida
 summary(titanic[properties])
 ```
 
 El campo **PassengerId** es únicamente para identificar a cada uno de los pasajeros. Por lo que no formará parte de ninguno de nuestro estudios. Pero lo asignamos como el valor de **id** de nuestro Dataframe.
 
-```{r}
+```{r indexing}
 # Asignamos el identificador de dataframe con los valores de PassengerId
 rownames(titanic) <- titanic$PassengerId
 # Eliminamos de la variable properties la variable
@@ -199,16 +207,25 @@ titanic$Pclass <- factor(titanic$Pclass)
    })
 ```
 
-```{r}
-with(titanic, plot(Pclass,Survived))
+Si representamos esta categoría de clase frente a la clase de salida, podemos observar datos interesantes. 
+
+```{r Pclas_vs_Survived}
+with(titanic, plot(Pclass,Survived, xlab="Pclass", ylab="Survived" ,main ="Pclass vs Survived"))
 ```
+
+Los viajeros de la clase 1 tienen mucha más probabilidad de sobrevivir que el resto de clases. 
+Los viajeros de la clase 2 tienen un 50 % de sobrevivir y los viajeros de las clase 3 tiene mucha mayor probabilidad de no sobrevivir.
+
+Por lo tanto, parece que la variable clase puede ser determinante para predecir si una persona sobrevive o no.
+
+
 ## Name -> Título
 
 Revisando visualmente el campo **Name**(nombre) observamos que están los títulos de cada uno de los viajeros. Es decir si son señores, señoras, señorítas. Lo cual podría ser variable diferenciadora para determinar si se puede salvar o no.
 
 Para ellos sacaremos el Título según los nombres
 
-```{r}
+```{r check_titles}
 # Cogemos los títulos según los nombres
 titanic$Title <- gsub('(.*, )|(\\..*)', '', titanic$Name)
 # Presentamos los anteriores títulos enfrentados al género
@@ -216,7 +233,8 @@ table(titanic$Sex, titanic$Title)
 ```
 
 Procedemos a convertir los títulos obtenidos en un grupo más reducido
-```{r}
+
+```{r convert_titles}
 # Titulos que vamos a convertir a Mr
 toMr_title  <- c ('Don', 'Major', 'Capt', 'Jonkheer', 'Rev', 'Col', 'Sir')
 # Convertirmos dichos títulos a Mr
@@ -244,7 +262,7 @@ table(titanic$Sex, titanic$Title)
 
 titanic$Title <- as.factor(titanic$Title)
 ```
-```{r}
+```{r pssenger_vs_Title}
 # Viajeros según la Titulo
   local({
    .Table <- with(titanic, table(Title))
@@ -255,10 +273,13 @@ titanic$Title <- as.factor(titanic$Title)
    })
 ```
 
-```{r}
-with(titanic, plot(Title,Survived))
+```{r Title_vs_Survived}
+with(titanic, plot(Title,Survived, xlab="Title", ylab="Survived", ,main ="Title vs Survived"))
 ```
+En la gráfica anterior, donde enfrentamos el título con la salida, observamos que tanto la Mrs, como Miss tienen una álta probabilidad de sobrevivir. Como se ve esto nos puede hacer pensar que las mujeres (females) van a tener mucha más probabilidad que los hombres de sobrevivir. Lo cuál se verán en el apartado siguiente.
+Y entre los hombres, observamos que los Mr. tienen mayor probabilidad de no sobrevivir, mientras que los que tiene el título de Master se aproximan a los procentajes de probabilidad de supervivencia de las mujeres.
 
+En espera de los resultados, que veamos al analizar la varible Sex, a priori este campo puede resultar interesante para nuestra predicción, incluyo que la combinación con Sex, puede determinar bastante la supervivencia o no de un pasajero.
 
 Pero eliminamos el campos **Name** que no parece útil para ninguno de los posibles modelos.
 
@@ -267,9 +288,10 @@ Pero eliminamos el campos **Name** que no parece útil para ninguno de los posib
 #titanic$Name <- NULL
 properties <- properties[!properties %in% "Name"]
 ```
+
 ## Sex
 
-El campo **Sex**(género) podría ser útil para nuestros modelos por lo que lo mantenemos.Y ya está como variable de tipo factor.
+El campo **Sex**(género) podría ser útil para nuestros modelos  como hemos visto anteriormente con los datos del título, que indirectamente establece el género del viajero.
 
 ```{r Sex}
 
@@ -283,15 +305,18 @@ El campo **Sex**(género) podría ser útil para nuestros modelos por lo que lo 
    })
 ```
 
-```{r}
-with(titanic, plot(Sex,Survived))
+```{r Sex_vs_Survived}
+with(titanic, plot(Sex,Survived, xlab="Sex", ylab="Survived", main ="Sex vs Survived"))
 ```
+Al enfrentrar el género con la supervivencia, observamos que las mujeres al igual que ocurria en  el caso de los títulos de las mujeres tienen un alto procentaje de supervivencia y por el contrario los hombre un alto porcentaje de no sobrevivivir. 
+
+Parece razonable, que la combinación de *Sex* y *Title* nos podría ayudar a determinar con una porcentaje bastate exacto la clase final en un arbol de decisión.
 
 ## Age
 
 El campo **Age**(edad) podría ser útil para nuestros modelos por lo que lo mantenemos, pero vemos que tiene valores perdídos que estudiaremos en el siguiente apartado.
 
-```{r}
+```{r age_histogram}
 ggplot(titanic, aes(Age, fill = factor(Survived))) + 
   geom_histogram(bins=30) 
 ```
@@ -302,22 +327,22 @@ ggplot(titanic, aes(Age, fill = factor(Survived))) +
 Los dos siguientes atributos **Sibsp**(hermanos, pareja) y **Parch** (padres e hijos)	pueden ser interesantes para nuestros modelos, pero creemos que  podría ser válido para nuestros modelos la unión de los dos en un nuevo campo que sea **Familiy**.
 
 
-```{r}
+```{r family_members}
 titanic$Family <- titanic$SibSp + titanic$Parch + 1
 properties <- append(properties, "Family")
 ```
 
 Es un atributo numérico, pero se puede considerar también cualitativo. 
 
-```{r}
+```{r Family_vs_Survived}
 titanic$Family <- as.factor(titanic$Family)
-with(titanic, plot(Family,Survived))
+with(titanic, plot(Family,Survived, xlab="Family", ylab="Survived",  main ="Family vs Survived"))
 ```
 Como vemos en la gráfica, podemos observar que las familias con más 5 o más miembros tienen mucha probabilidad de no sobrevivir. Por otra parte los solteros  también tiene alta probabilidad de no sobrevivir y sin embargo  las familias con ménos de 5 miembros tienen alta probabilidad de sobrevivir.
 
 Por ellos vamos a realizar una agrupación al campo **FamilyType** según estas agrupaciones.
 
-```{r}
+```{r FamilyType}
 titanic$Family <- as.numeric(titanic$Family)
 titanic$FamilyType <- 'Regular'
 titanic$FamilyType[titanic$Family ==1]  <- 'Single'
@@ -326,22 +351,23 @@ titanic$FamilyType[titanic$Family >=5]  <- 'Large'
 titanic$FamilyType <- ordered(titanic$FamilyType, c("Single", "Regular", "Large"))
 
 titanic$FamilyType <- as.factor(titanic$FamilyType)
-with(titanic, plot(FamilyType,Survived))
+with(titanic, plot(FamilyType,Survived, xlab="Family Type", ylab="Survived", main ="Family Type vs Survived"))
 
 
 
 ```
 Este campo nuevo parece bastante interesante para poder discernir si un viajero tiene posibilidad de sobrevivir o no.
 
-```{r}
+De esta última gráfica, se puede observar que las famílias entre 2 y 4 miembros tiene mayor probabilidad de sobrevivir. Miembras que los solteros y las famílias numerosas de más de 5 miembros su probabiliadd de sobrevivir es mucho más baja.
+Por lo que parece que el tipo de familia puede ser interesante para discernir la clase de salida. 
+
+```{r properties_familytype}
 # Añadimos este campo a la properties
 properties = c(properties, "FamilyType")
 # Eliminar Family, SibsSPy Parch
 properties <- properties[!properties %in% c("Family", "SibSp", "Parch")]
 
 ```
-
-
 
 
 ## Ticket
@@ -369,7 +395,7 @@ properties <- properties[!properties %in% "Ticket"]
 
 EL campo **Fare**(precio del billete) a priori parece interesante para un modelo de predicción de si el pasajero sobrevive o no. Vemos que tiene un valor perdido que también veremos en el próximo apartado.
 
-```{r echo=FALSE}
+```{r  Fare_density_NA, echo=FALSE}
 ggplot(titanic, 
   aes(x = Fare)) +
   # Función de densidad de los valores de Fare filtrados
@@ -378,8 +404,8 @@ ggplot(titanic,
   geom_vline(aes(xintercept=median(Fare, na.rm=T)),
     colour='red', linetype='dashed', lwd=1) 
 ```
-Observamos que hay muchos datos extremos, y nos hace plantearnos que el campo Fare es el precio del billete y es definido por el número de personas de dicho ticket.
-
+Al observar la función de densidad observamos que hay muchos datos extremos, y nos hace plantearnos que el campo Fare es el precio del billete completo y puede estar definido por el número de personas de dicho ticket.
+Lo analizaremos cuando veamos los valores extremos.
 
 ## Cabin  -> Deck
 
@@ -392,21 +418,24 @@ titanic %>%
     count()
 ```
 
-```{r}
+```{r second_summary}
 # Hacemos un sumary
 summary(titanic[properties])
 ```
 
-En el resumen vemos que hay 271 tipos de cabinas, por lo que parecería interesante ya que se agruparían muchos pasajeros, pero uno de los grupos contiene 1014 pasajeros. Por esto parece que no es muy interesante  pero agruparlos por las cubiertas de la cabina, para ver si es interesante dicha propiedad
+En el resumen vemos que hay  más de 271 tipos de cabinas, por lo que parecería interesante ya que se agruparían muchos pasajeros, pero uno de los grupos contiene 1014 pasajeros. Por esto parece que no es muy interesante.
+Pero podemos agruparlos por las cubiertas de la cabina, para ver si es interesante esta nueva propiedad.
 
 ```{r Deck}
 titanic$Cabin <- as.character(titanic$Cabin)
 titanic$Deck<-sapply(titanic$Cabin, function(x) strsplit(x, NULL)[[1]][1])
 titanic$Deck[is.na(titanic$Deck)] <- "No Cabin"
 titanic$Deck <- as.factor(titanic$Deck)
-with(titanic, plot(Deck,Survived))
+with(titanic, plot(Deck,Survived, xlab="Deck", ylab="Survived", main ="Deck vs Survived"))
 ```
-Este propiedad parece más interesante, porque  hay una probabilidad de 70% que si un pasajero no tuviera cabina, no sobreviviese.
+Este propiedad parece más interesante, porque  hay una probabilidad de 70% que si un pasajero no tuviera cabina, no sobreviviese. 
+Mientas que si tiene cabina la probabiliad baja dependiendo de la cubierta.
+
 
 ```{r remove_Cabin}
 # Eliminamos de la variable properties la variable
@@ -431,8 +460,7 @@ titanic %>%
 
 De la agrupación vermos que tenemos 4 niveles y uno de ello es valor perdido, que estudiaremos en el próximo apartado.
 
-Si analizamos los datos del embarque
-```{r }
+```{r Passenger_by_embarked}
 
 # Viajeros según el embarque
   local({
@@ -444,12 +472,13 @@ Si analizamos los datos del embarque
    })
 ```
 
-```{r}
-with(titanic, plot(Embarked,Survived))
+```{r Embarked_vs_Survived}
+with(titanic, plot(Embarked,Survived, xlab="Embarked", ylab="Survived", main ="Embarked  vs Survived"))
 ```
 
 De la gráfica podemos observar que parece que dependiendo de donde se realizase el embarque, hay variación de la probabilidad de sobrevivir por lo que parece un campo interesante de estudio.
 
+Aunque la diferencia de probabilidad, no parece muy determinante ya que están muy próximas las probabilidades.
 
 # Limpieza de los datos.
 
@@ -461,13 +490,13 @@ Como hemos visto en el apartado anterior  de nuestras propiedades numéricas ten
 
 Buscamos el único valor que contiene NA en su propiedad *Fare*
 
-```{r}
+```{r Fare_NA}
 titanic %>% filter(is.na(titanic$Fare))
 ```
 
 De este pasajero observamos que su embarque fué en *Southampton* (‘S’) y es de tercera clase, que parece propiedades que determinarían el precio del embarque.
 
-```{r}
+```{r density_fare_3_class_Southampton}
 
 ggplot(titanic[titanic$Pclass == '3' & titanic$Embarked == 'S', ], 
   aes(x = Fare)) +
@@ -480,19 +509,29 @@ ggplot(titanic[titanic$Pclass == '3' & titanic$Embarked == 'S', ],
 
 De esta visualización vemos que la mayoría de los valores se concentran cerca de la mediana, por lo que parece razonable sustituir el valor perdido con el valor de la mediana del grupo que corresponde con la misma clase y el mismo embarque.
 
-```{r}
+```{r replace_fare}
 # Reemplazamos el valor perdido con el valor de la mediana
 titanic$Fare[1044] <- median(titanic[titanic$Pclass == '3' & titanic$Embarked == 'S', ]$Fare, na.rm = TRUE)
 sprintf ("Valor Fare reemplazado: %s", titanic$Fare[1044])
 ```
+Si representamos de nuevo nuestras función densidad, vemos que es bastante similar.
 
+```{r density_Fare}
+
+ggplot(titanic[titanic$Pclass == '3' & titanic$Embarked == 'S', ], 
+  aes(x = Fare)) +
+  # Función de densidad de los valores de Fare filtrados
+  geom_density(fill = '#99d6ff', alpha=0.4) + 
+  # Dibujamos la recta de la mediana
+  geom_vline(aes(xintercept=median(Fare)),
+    colour='red', linetype='dashed', lwd=1) 
+```
 
 ### Valor *Age* con valor NA
 
-
 Como hemos visto los valores perdidos del atributo *Age* es de 263 que frente al total suponen un 20% que es una gran cantidad de valores perdidos.
 
-```{r}
+```{r age_NA}
 summary(titanic %>% select(properties) %>% filter(is.na(Age)))
 ```
 
@@ -512,15 +551,16 @@ mod_knn <- kNN(titanic, variable = ("Age"))
 
 Con un Random Forest con la librería mice.
 
-```{r message=FALSE, warning=FALSE}
-set.seed(129)
+```{r mice_Age, message=FALSE, warning=FALSE}
+seed = 129
+set.seed(seed)
 mice_mod <- mice(titanic[, !names(titanic) %in% c('PassengerId','Name','Ticket','Cabin','Survived')], method='rf') 
 mice_output <- complete(mice_mod)
 ```
 
 Después de obtener los valores, con los dos métodos, representamos la función densidad, y la comparamos con los datos originales. Para valorar, como varía la función densidad de los datos con las imputaciones realizadas.
 
-```{r}
+```{r density_AGE}
 
 # Función densidad de la Edad con los datos original
 Age_original <- ggplot(titanic, 
@@ -562,7 +602,7 @@ Sin embargo, con el método **Knn** obtenemos una gráfica más distorsionada e 
 Por lo que procedemos a remplazar en nuestro dataframe los datos obtenidos con el método **Random-Forest** en los valores perdidos
 
 
-```{r replace_RF}
+```{r replace_Age}
 # Reemplazamos los datos de la edad en nuestro dataframe original
 titanic[,"Age"] <- mice_output$Age
 ```
@@ -576,7 +616,7 @@ titanic %>% filter(Embarked == "")
 Observamos que las instancias que tienen el embarque vacio son de la Clase 1 y tienen un precio de embarque de 80. 
 Para ver como se distribuyen los precios de los embarques representamos los *boxplot* de la población según los embarques, descartando los elementos que tienen embarque vacio
 
-```{r}
+```{r boxplot_embarked_fare}
 # Eliminamos de la población los que tiene embarque vacio
 embark_fare <- titanic %>%
   filter(PassengerId != 62 & PassengerId != 830 & Pclass==1)
@@ -594,6 +634,12 @@ titanic$Embarked[titanic$Embarked==""] <- "C"
 titanic$Embarked <- as.factor(as.character(titanic$Embarked))
 ```
 
+Al volver a dibujar los tipos de embarques respecto a la probabilidad de Sobrevivir observamos que no se varía la probabilidad de la población de sobrevivir al realizar la modificación.
+
+```{r plot_Embarked_Survived}
+with(titanic, plot(Embarked,Survived, xlab="Embarked", ylab="Survived", main ="Embarked vs Survived"))
+```
+Aunque como hemos visto la probabilida de salida no es muy determinante, pero si que puede ayudar en algunos casos donde haya dudas con la probabilidad de otras de las varibles.
 
 ## Identificación y tratamiento de valores externos
 
@@ -606,7 +652,7 @@ numeric_properties <- c ("Age",  "Fare", "Family")
 summary(titanic %>% select(numeric_properties))
 ```
  Los cinco números también  se representan gráficamente con **boxplot**
-```{r}
+```{r third_summary}
 sapply(titanic[numeric_properties], boxplot.stats)
 ```
  
@@ -622,16 +668,17 @@ Age_boxplot
 
 De la gráfica, observamos que la mayoría de la población se encuentra entre 0 y 60 años aproximadamente. Pero hay pasajeros que se encuentra entre los 60 y los 80 años. Por lo que no parece que hay errores tipográficos, y parecen valores razonables ya que no hay ninguna edad que pueda ser considerada erronea.
 
-```{r}
+```{r boxplot_agetype}
 titanic$AgeType[titanic$Age < 18] <- "Child"
 titanic$AgeType[titanic$Age >= 18 & titanic$Age < 65] <- "Adult"
 titanic$AgeType[titanic$Age >= 65] <- "Elder"
 titanic$AgeType <- ordered(titanic$AgeType, c("Child", "Adult", "Elder"))
 ```
-```{r}
+
+```{r Passenger_by_embarked_2}
 # Viajeros según el embarque
   local({
-   .Table <- with(titanic, table(AgeType))
+   .Table <- with(titanic, table(AgeType ))
    cat("\ncounts:\n")
    print(.Table)
    cat("\npercentages:\n")
@@ -639,22 +686,21 @@ titanic$AgeType <- ordered(titanic$AgeType, c("Child", "Adult", "Elder"))
    })
 ```
 
-```{r}
-
-with(titanic, plot(AgeType,Survived))
+```{r Age_vs_Survived}
+with(titanic, plot(AgeType,Survived, xlab="Age Type", ylab="Survived", main ="Age Type vs Survived"))
 ```
-```{r}
+```{r remove_Age}
 #Eliminaos la propiedad Age
 properties <- properties[!properties %in% "Age"]
 # Añadimos la variable Deck
 properties <- c(properties, "AgeType")
 ```
 
-
+Como podemos observar en la gráfica los niños también tienen mayor probabilidad de sobrevivir respesto al resto de las clases y los ancinos tiene mucha más probabilidad de no sobrevivir.
 
 ### Fare
 
-```{r}
+```{r boxplot_Fae}
 Fare_boxplot <- ggplot(titanic, aes(x="", y=Fare)) +
   geom_boxplot() 
 Fare_boxplot
@@ -670,7 +716,7 @@ Fare_boxplot_Pclass
 
 Para verificar, los valores extremos podemos calcular el precio por persona y relacionarlo con la clase.
 
-```{r}
+```{r passenger_by_ticket}
 # Calculamos el número de pasajeros por ticket
 titanic$person_per_ticket <- sapply(titanic$Ticket,
                       function(x) nrow(subset(titanic, Ticket==x)))
@@ -679,20 +725,27 @@ titanic$Fare_per_person=titanic$Fare/titanic$person_per_ticket
 ```
 
 
-```{r}
+```{r boxplot_fare_per_person}
 # Representams el boxplot del precio por pasajero frente a la clase
 Fare_per_person_boxplot_Pclass <- ggplot(titanic, aes(x=Pclass, y=Fare_per_person)) +
   geom_boxplot() 
 Fare_per_person_boxplot_Pclass
 ```
 
+Además de esta forma de representar los datos el número de valores extremos se reducen de 171 a 160.
+```{r summary_outliers_Fare_per_person_Pclass}
+Table_FppbPclass <- ggplot_build(Fare_per_person_boxplot_Pclass)$data
+sum(sapply(Table_FppbPclass[[1]]$outliers, length))
+```
 En esta gráfica del precio por persona del billete, observamos una mayor diferencia de los precios por la clase del billete. 
 Aun habiendo precios que son valores extremos, se puede ver que los rangos por cada clase son razonables. Ya que por el precio del billete en el mayoría de los casos se podría determinar a que clase pertenece.
+
+Hay que destacar que en ambas clases hay billetes qeu fueron grátis.
 
 Por lo que parece más razonable utilizar esta variable calculada **Fare_per_person** que la original.
 
 
-```{r include=FALSE}
+```{r add_fare_per_person, include=FALSE}
 # Añadimos Fare_per_person como posible varible para sustituir por el Fare
 properties <- c(properties, "Fare_per_person")
 properties <- properties[!properties %in% "Fare"]
@@ -703,7 +756,7 @@ numeric_properties <- numeric_properties[!numeric_properties %in% "Fare"]
 
 ### Family
 
-```{r}
+```{r boxplot_family}
 Family_boxplot <- ggplot(titanic, aes(x="", y=Family)) +
   geom_boxplot() 
 Family_boxplot
@@ -724,20 +777,14 @@ En nuestro caso, el objetivo es detectar las variables que más contribuyen a ex
 
 Nuestro dataset ya se nos ha dado en dos conjuntos, uno para estudio y otro para dar solución al problema que se plantea en Kaggle. Estos  son los que tenemos un valor en la clase de salidad **Survived**.
 
-Para hacer el estudio separaremos el primer conjunto en dos uno para entrenamiento y otro para test. 
-La separación la realizaremos en 80% para training y 20% para test.
-Y el tercer grupo será para dar los resultado .
+Para hacer el estudio, utilizaremos el primer  el primer conjunto  para entrenamiento y otro para la respuesta final. 
+
+Para comparar los modelos  realizaremos validaciones cruzadas en los entrenamientos para eviatar sobre ajustes o sub ajustes.
+
 ```{r splitdata}
 # Separamos los datos
-notsubmission <- titanic %>% filter(not(is.na(Survived)))
-index <- createDataPartition(notsubmission$PassengerId, p = 0.8, list = FALSE)
-
-train <- notsubmission[index,]
-test <- notsubmission[-index,]
-
+train <- titanic %>% filter(not(is.na(Survived)))
 rownames(train) <- train$PassengerId
-rownames(test) <- test$PassengerId
-
 
 # Datos de  entrega
 submission <- titanic %>% filter(is.na(Survived))
@@ -757,6 +804,7 @@ Para el estudio de la normalidad y homogeneidad de la varianza en nuestro conjun
 sapply(train[c(numeric_properties)], ad.test)
 
 ```
+
 Si nos fijamos en los valores de p de todos los atributos y asignamos el valor de significación de 0,05 , observamos que todos ellos son valores muy por debajo del valor de significación. Por tanto no se puede aceptar la hipótesis nula. Por lo que podemos afirmar con un 95 % de fiabilidad que **los datos no siguen una distribución normal**.
 
 Podríamos también aplicar el test de normalidad de Shapiro-Wilk.
@@ -778,114 +826,176 @@ train$SurvivedNumeric <- 0
 train$SurvivedNumeric[train$Survived ==1]<- 1
 test$SurvivedNumeric <- 0 
 test$SurvivedNumeric[test$Survived ==1]<- 1
-fligner.test(SurvivedNumeric ~ Family, data = train)
+fligner.test(Family ~ Survived, data = train)
 ```
 A un 95% de confianza la varianzas **no son iguales** entre los grupos
 
 
 ```{r Fligner-Killeen-Family}
-fligner.test(SurvivedNumeric ~ Fare_per_person, data = train)
+fligner.test(Fare_per_person ~ Survived, data = train)
 ```
-A un 95% de confianza la varianzas ** son iguales** entre los grupos
+A un 95% de confianza la varianzas **no son iguales** entre los grupos
 
 ```{r Fligner-Killeen-Fare}
-fligner.test(SurvivedNumeric ~ Age, data = train)
+fligner.test(Age ~ Survived, data = train)
 ```
 
-A un 95% de confianza la varianzas **son iguales** entre los grupos
+A un 95% de confianza la varianzas **son iguales** entre los grupos.
 
+De las pruebas anteriores, podemos determinar que no podríamos hacer un contraste con ANOVA ya que las poblaciones (distribuciones de probabilidad de la variable dependiente correspondiente a cada factor) no son normales y tampoco cumple la homoscedasticidad.
+ 
 ## Aplicación de pruebas estadísticas para comparar los grupos de dato
 
 Para el siguiente estudio nos quedaremos con las propiedades Pclass, Sex, AgeType, Embarked , Title, FamilyType, Deck, Fare_per_person.
 
 De las cuales una es numéricas Fare_per_person y el resto son categóricas
 
-```{r include=FALSE}
+```{r  numeric_properties, include=FALSE}
 numeric_properties <- c("Fare_per_person")
 ```
 
 Aunque podríamos utilizar otras dos variables que serían Family o Age si el modelo requiera valores numéricos.
 
-### Análisis de correlacción
+### estadístico Chi-cuadrado 
 
-Nuestra primera prueba estadística será la de estudiar cuál de nuestras variables tiene mayor repercusión sobre la variable dependiente. 
-Para hacer el análisis utilizaremos las variables numéricos Family, Age y Fare_per_person y las categóricas Pclass, Sex, Embarked y title.
-Para realizar el análisis de correlación tendremos que crear variables dummies para las variables categócias.
-Utilizaremos el coeficiente de correlación de pearson y un nivel de corte de correlación de 0.7.
+Como nuestra clase de salida es de tipo categórica y no numérica, y la mayoría de nuestras variables también lo son podemos hacer una análisis de contraste basado de Chi-cuadrado para ver la dependencia o independencia de dos variables de nuestra muestra.
 
-```{r}
-train_CM <-  dummy.data.frame(train[c("SurvivedNumeric","Pclass", "Sex", "Embarked", "Title","Family" ,"Deck", "Age"      , "Fare_per_person")], sep = ".")
+Nuestra hipótesis serán:
 
-test_CM <-  dummy.data.frame(test[c("SurvivedNumeric","Pclass", "Sex", "Embarked", "Title","Family" ,"Deck", "Age"      , "Fare_per_person")], sep = ".")
+- H0: Las variables son independientes por lo que una variable no varía entre los distintos niveles de la otra variable.
 
-CM <- cor(train_CM)
-highlyCorrelated <-  findCorrelation(CM, cutoff = 0.7 , names = TRUE)
-c(highlyCorrelated)
-```
-Como vemos las variables es más correladas están son todas categóricas. 
+ - H1: Las variables son dependientes, una variable varía entre los distintos niveles de la otra variable.
 
-### Modelo de regresión lineal (logit)
+Escogemos un nivel de significación del 0,05.
 
-Crearemos un modelo de regresión lineal con los  predictores anteriores, usando el conjunto de entrenamiento (*train*). Para su evaluación, se usará el *test*.
-Como son categóricas utilizaremos con base los elementos que tenemos mayor correlación.
+En primer lugar estudiaremos la dependencia entre la **Pclass** y nuestra variable de salida **Survived**
 
-```{r}
-logitMod <- glm(SurvivedNumeric ~ Pclass.1 + Pclass.2 + Title.Mr + Title.Miss  + Title.Mrs + Sex.female + Embarked.C + Embarked.Q , data=train_CM, family=binomial(link="logit"))
-
-summary(logitMod)
-```
-Vemos que estadísticamente los más relevantes son las Clase 1 y 2 junto con el título de Mr.
-
-Se hace notar que la variable Sex.female no está definida. Esto es consecuencia en que hay otra variable que está altamente relacionada con Sex. Si presentamos los datos  de la matriz de correlación vemos que hay una correlación alta con Tittle.Mr.
-
-```{r}
-CM["Sex.female",]
-```
-Por lo que podríamos eliminar una de las dos variables. Por ejemplo Sex.female
-
-```{r}
-logitMod <- glm(SurvivedNumeric ~ Pclass.1 + Pclass.2 + Title.Mr + Title.Miss  + Title.Mrs  + Embarked.C + Embarked.Q , data=train_CM, family=binomial(link="logit"))
-
-summary(logitMod)
+```{r PclassVsSurvived}
+with(titanic, addmargins(table(Pclass, Survived)))
 ```
 
-Para obtener una métrica del modelo según los datos de entrenamiento
-
-```{r}
-logitModPredTrain <- predict(logitMod, type = "response")
-logitCMTrain <- table(train_CM$Survived, logitModPredTrain >= 0.5)
-logitCMTrain
-```
-```{r}
-
-logitAccuracy <- local( function(table) { 
-  total <- table[1,1] +table[1,2]+table[2,1]+table[2,2]
-  accuracy <- (table[2,2]+ table[1,1]) / total
-  accuracy
-})
-logitSensitivity <- local( function(table) { 
-  sensitivity <- table[2,2] / (table[2,2] + table[2,1])
-  sensitivity
-})
-logitSpecificity <- local( function(table) { 
-  specificity <- table[1,1] / (table[1,1] + table[1,2])
-  specificity
-})  
-
-logit_accuracy_train <- logitAccuracy(logitCMTrain)
-cat ("Accuracy train:" , logit_accuracy_train)
+```{r chi2_Pclass_Survived}
+chisq.test(x =with(titanic, table(Pclass, Survived)))
 ```
 
+Como el valor de p-value es menor que 0.05 podemos rechazar la hipótesis nula por lo que podemos decir que la variable **Survived** es dependiente de la varible **Pclass*.
 
-```{r}
-logitModPredTest <- predict(logitMod, type = "response", newdata = test_CM)
-logitCMTest <-table(test_CM$Survived, logitModPredTest >= 0.5)
-logitCMTest
+Ahora utilizaremos las varibales **Sex** y nuestra variable de salida **Survived**
+
+```{r SexVsSurvived}
+with(titanic, addmargins(table(Sex, Survived)))
+```
+
+```{r chi2_Sex_Survived}
+chisq.test(x =with(titanic, table(Sex, Survived)))
+```
+Al igual que en el caso anterior pordemos rechazar la hipótesis nula y la supervivencia depende del género.
+
+Si aplicamos el mismo contrates a **Title** frente a **Survived**
+
+```{r TitleVsSurvived}
+with(titanic, addmargins(table(Title, Survived)))
+```
+
+```{r chi2_Title_Survived}
+chisq.test(x =with(titanic, table(Title, Survived)))
+```
+
+También observamos que la supervivencia depende del título.
+
+Si lo aplicamos al embarked
+
+```{r EmbarkedVsSurvived}
+with(titanic, addmargins(table(Embarked, Survived)))
+```
+```{r chi2_Embarked_Survived}
+chisq.test(x =with(titanic, table(Embarked, Survived)))
+```
+Observamos de nuevo la dependencia entre el embarque y la supervivencia
+
+Si lo aplicamos a la edad
+
+```{r AgeTypeVsSurvived}
+with(titanic, addmargins(table(AgeType, Survived)))
+```
+En el caso de la **AgeType** con la supervivencia
+
+```{r chi2_AgeType_Survived}
+chisq.test(x =with(titanic, table(AgeType, Survived)))
+```
+Vemos la dependencia de la edad también con la supervivencia
+
+En el caso de la **FamilyType** con la supervivencia
+
+```{r chi2_FamilyType_Survived}
+chisq.test(x =with(titanic, table(FamilyType, Survived)))
+```
+Vemos la dependencia del número de familiares también con la supervivencia
+
+
+Si lo aplicamos a la Deck
+
+```{r DekcVsSurvived}
+with(titanic, addmargins(table(Deck, Survived)))
+```   
+En el caso de la **Deck** con la supervivencia
+
+```{r chi2_Deck_Survived}
+chisq.test(x =with(titanic, table(Deck, Survived)))
+```
+
+En este caso vemos que el resultado determina la dependencia entre las dos varibles, pero da un aviso ya que la aproximación es incorrecto.
+
+Esto es debido a que la prueba se basa en los conteos de cada valor distribuyen de manera más o menos normal. Si muchos de los conteos esperados son muy pequeños, la aproximación puede ser deficiente. Como se puede ver en el caso de T Y G donde tenemos 1 ,2 ,0 cuentas para esa valor de la variable Deck respecto a la clase de salida.
+
+Por ello no esta variable **no la tendremos** en cuenta en nuestros modelos.
+  
+
+### Modelo de regresión logística
+
+Crearemos un modelo de regresión logística con los  predictores anteriores, usando el conjunto de entrenamiento (*train*). 
+
+En primer lugar preparamos los datos para utilizar la regresión logísitica con el paquete **caret*
+```{r train_logit}
+train_Logit <- train[c(properties, "Survived")]
+
+# Convertimos las variables para factores que funcione en train
+train_Logit$Survived <- make.names(train_Logit$Survived,  unique = FALSE)
+train_Logit$Pclass <- make.names(train_Logit$Pclass,  unique = FALSE)
+```
+
+Para la comprobación del modelo utilizamos una validación cruzada, intentando evitar la sobre o  infra estimación del modelo.
+Utilizaremos las misma validación cruzada para todos los modelos.
+
+```{r trainControl}
+# COntrol genérico 
+trainControl <- trainControl(method="repeatedcv", 
+                             number=10,
+                             repeats=5,
+                             p=0.8, 
+                             search='grid',
+                             classProbs = TRUE,
+                             savePredictions = TRUE,
+                             summaryFunction = twoClassSummary) 
 
 ```
-```{r}
-logit_accuracy_test <- logitAccuracy(logitCMTest)
-cat ("Accuracy test:" , logit_accuracy_test)
+
+
+```{r cv_logit_train }
+cv_logit <- train(Survived ~ Pclass + Title +  Embarked+ FamilyType + AgeType + Fare_per_person,
+                             data= train_Logit, 
+                             method = "glm", 
+                             trControl = trainControl,
+                             metric = "ROC", 
+                             preProc = c("center", "scale"))
+
+```
+
+
+De los resultados de nuestro modelo, vemos que tanto la Sensibilidad como la Especificidad son bastante buenos y podría ser un buen modelo. Pero lo compararemos posteriormente con el resto de modelos.
+
+```{r print_cv_logit}
+cv_logit
 ```
 
 
@@ -893,55 +1003,292 @@ cat ("Accuracy test:" , logit_accuracy_test)
 
 Como la mayoría de las variables que tenemos las hemos categorizado, una modelo de clasificación que podríamos optar es por un Random-forest.
 
+```{r train_RF}
+train_RF<- train[c(properties, "Survived")]
+
+# Convertimos las variables para factores que funcione en train
+train_RF$Survived <- make.names(train_RF$Survived,  unique = FALSE)
+
+train_RF$Pclass <- make.names(train_RF$Pclass,  unique = FALSE)
+
+# Creamos unos rángos para los hiperparámetros
+
+grid_RF <- expand.grid(.mtry=seq(1, 10, by=1))
+```
+
+Entrenamos nuestro modelo con  la validación cruzada y ponemos como hiperparámetro el valor mtry (número de variable aleatoriamente muestreados como candidatos en cada partición).
+
 ```{r rf}
-x_rf_train <- train[c(properties)]
-y_rf_train <- train$Survived
-rf <- C50::C5.0( x_rf_train, y_rf_train)
-summary(rf)
-```
 
-Como vemos el error es de casi un 16%, teniendo una precisión del 84% que es bastante bueno.
-
-También observamos que los falsos negativos, es decir personas que nuestro modelo determina que no sobrevive, pero si lo hace es de 39 que no supone ni un 5%.
-Los falsos positivos, es un poco más alto llegando al 11%.
-
-
-Ahora hacemos la predicción
-
-```{r}
-x_rf_test <- test[properties]
-y_rf_test = predict(rf, newdata = x_rf_test)
-x_rf_test$Survived<- y_rf_test
+cv_RF <- train(Survived ~ Pclass + Title +  Embarked + FamilyType + AgeType + Fare_per_person,
+                             data= train_RF, 
+                             method = "rf", 
+                             trControl = trainControl,
+                             metric = "ROC", 
+                             preProc = c("center", "scale"),
+                             tuneGrid=grid_RF)
 
 ```
 
+Ahora representamos los valores obtenidos de nuestra busqueda de paramátros mtry
 
+```{r plot_rf}
+plot(cv_RF)
+```
+
+Como podemos observar la mejor precisión la obtenemos con  el mtry=5. Lo cual  prensentando el resumen de nuestro modelo también nos los dice.
+
+```{r print_rf}
+cv_RF
+```
+
+De los tantos obtenidos para mtry=5 observamos una mejora del area sobre la curva ROC por lo que parece que este modelo es mejor que la regresión logística.
 
 ### SVM
 
 Otro modelo que podemos utilizar para predecir la supervivencia de un viajero sería SVM ( Support Vector Machine). 
-Como la mayoría de nuestras propiedades son categóricas tendríamos que utilizar un valor dummy para aquellas que no la hayamos obtenido de la numérica.
-Para el caso de Age y Family utilizaremos la versión numérica en vez de la categórica
+
+```{r train_SVM}
+train_SVM<- train[c(properties, "Survived")]
+
+# Convertimos las variables para factores que funcione en train
+train_SVM$Survived <- make.names(train_SVM$Survived,  unique = FALSE)
+
+train_SVM$Pclass <- make.names(train_SVM$Pclass,  unique = FALSE)
+
+# Creamos unos rángos para los hiperparámetros
+
+grid_SVM <- expand.grid(.sigma=c(0.025, 0.05, 0.1, 0.15), .C=seq(1, 10, by=1))
+```
+Entrenamos nuestro modelo con  la validación cruzada y asignamos el rango de hiperparámetros sigma  y coste (c) para buscar el mejor modelo
+
+```{r SVM}
+
+cv_SVM <- train(Survived ~ Pclass + Title +  Embarked+ FamilyType + AgeType + Fare_per_person,
+                             data= train_RF, 
+                             method = "svmRadial", 
+                             trControl = trainControl,
+                             metric = "ROC", 
+                             preProc = c("center", "scale"),
+                             tuneGrid=grid_SVM)
+
+```
+
+Una vez entrenado el modelo representamos los valores de nuestros hiperparámetros  para buscar la mejor opción de nuestro model SVM.
+
+```{r plot_SVM}
+plot(cv_SVM)
+```
+
+Como se puede ve la mejor opción es Sigma = 0.15 y coste=2
+```{r print_SVM}
+cv_SVM
+```
+
+El valor del area de la curva ROC es poco peor que el anterior modelo.
+
+
+# Representación de los resultados a partir de tablas y gráficas.
+
+Como hemos visto anteriormente, los modelos parecen lo suficientemente buenos, pero debemos elegir de entre los tres anteriores con el cuál resolveríamos el problema.
+
+Para realizar una comparación entre los métodos representaremos la tabla con los valores de las curvas ROC obtenidas por los tres métodos.
+
+```{r comparative_table}
+columns = c("ROC", "Sens", "Spec", "ROCSD", "SensSD", "SpecSD")
+
+best_result_LOGIT <-  cv_logit$results
+best_result_LOGIT$Method <- "Logistic"
+best_result_LOGIT$sigma <- NA
+best_result_LOGIT$C <- NA
+best_result_LOGIT$mtry <- NA
+
+best_result_RF <-  cv_RF$results %>% filter (mtry == cv_RF$bestTune[,"mtry"])
+best_result_RF$Method <- "Random-Forest"
+best_result_RF$parameter <- NA
+best_result_RF$sigma <- NA
+best_result_RF$C <- NA
+
+best_result_SVM <- cv_SVM$results %>% filter (C == cv_SVM$bestTune[,"C"] & sigma == cv_SVM$bestTune[,"sigma"])
+best_result_SVM$Method <- "SVM"
+best_result_SVM$parameter <- NA
+best_result_SVM$mtry <- NA
+
+results <- rbind(best_result_LOGIT, best_result_RF, best_result_SVM)
+columns = c("Method", "ROC", "Sens", "Spec", "ROCSD", "SensSD", "SpecSD")
+results[columns]
+```
+De la tabla podemos observar que el peor modelo sería el **SVM** según el área de la curva ROC. Pero es el que mejor Sensibilidad tiene.
+
+Para tener una mejor visión, podemos representar el valor media y con su desviación típica
 
 ```{r}
-train_SVM <- dummy.data.frame(train[c("Pclass", "Sex", "Age", "Embarked" , "Title", "Family", "Deck", "Fare_per_person")], sep = ".")
-train_SVM$Survived <- train$Survived
+table_roc <- results[c("Method", "ROC", "ROCSD")]
+table_roc$Measure <- "ROC"
+table_roc <- table_roc %>% rename (
+    mean = ROC,
+    sd = ROCSD
+    )
+
+table_sens <- results[c("Method", "Sens", "SensSD")]
+table_sens$Measure <- "Sens"
+table_sens <- table_sens %>% rename(
+     mean = Sens,
+    sd = SensSD
+    )
+
+table_spec <- results[c("Method", "Spec", "SpecSD")]
+table_spec$Measure <- "Spec"
+table_spec <- table_spec %>% rename(
+    mean = Spec,
+    sd = SpecSD
+    )
+
+
+compare_plot <- rbind(table_roc, table_sens, table_spec)
+
 ```
 
-```{r message=TRUE, warning=TRUE}
-trainControl <- trainControl(method="repeatedcv", number=10, repeats=3)
-metric <- "Accuracy"
-grid <- expand.grid(.sigma=c(0.025, 0.05, 0.1, 0.15), .C=seq(1, 10, by=1))
-fit.svm <- train(Survived~., data=train_SVM, method="svmRadial", metric=metric, tuneGrid=grid,
-preProc=c("BoxCox"), trControl=trainControl, scale = FALSE )
-print(fit.svm)
+```{r errroplot}
+#compare_plot$Method <- cbind( results["Method", "ROC", "ROCSD"])
+
+ggplot(compare_plot, aes(x = Measure, colour=Method)) +
+  geom_errorbar(aes(ymax = mean + sd, ymin = mean - sd),
+                position = "dodge") +
+  geom_point(position=position_dodge(width=0.9), aes(y=mean, colour=Method))  +
+  ggtitle("ROC - Sensibility - Specificity") +
+  labs (y ="value")
+```
+Con esta gráfica vemos cual es el mejor método según las tres medidas:
+
+- Según la curva ROC: Una medida más general del modelo de predecir positivos y negativos correctamente  el mejor es **Random-Forest**
+- Segun la sensibilidad: Es decir una mayor predisposición para catalogar como sobrevivientes entonces el mejor modelo es **SVM**
+- Según la especifidad: La mayor predisposición del modelo para catalogar como no supervivientes entonces el mejor modelos es **Regresión Logísitica**
+
+Para verificar este resultado podemos dibujar las gráficas del ROC de cada uno de los modelos (la media de las validaciones cruzadas)
+
+```{r roc_logit}
+
+roc_logit = roc(as.numeric(cv_logit$trainingData$.outcome=='X1'),aggregate(X1~rowIndex,cv_logit$pred,mean)[,'X1'],
+            smoothed = TRUE,
+            # arguments for ci
+            ci=TRUE, ci.alpha=0.95, stratified=FALSE,
+            # arguments for plot
+            plot=TRUE, 
+            auc.polygon=TRUE,
+            max.auc.polygon=TRUE,
+            grid=TRUE,
+            print.auc=TRUE,
+            show.thres=TRUE,
+            print.thres="best",
+            main="Logistic"
+            )
+```
+
+```{r roc_rf}
+
+roc_RF = roc(as.numeric(cv_RF$trainingData$.outcome=='X1'),aggregate(X1~rowIndex,cv_RF$pred,mean)[,'X1'],
+            smoothed = TRUE,
+            # arguments for ci
+            ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+            # arguments for plot
+            plot=TRUE, 
+            auc.polygon=TRUE,
+            max.auc.polygon=TRUE,
+            grid=TRUE,
+            print.auc=TRUE,
+            show.thres=TRUE,
+            print.thres="best",
+            main="Random-Forest"
+            )
+
 ```
 
 
 
-# Representación de los resultados a partir de tablas y gráficas. 
+
+```{r roc_SVM}
+# Obtenemos la media de la curva ROC de las distintas validaciones
+best_model_SVM <-  cv_SVM$pred %>% filter (C == cv_SVM$bestTune[,"C"] & sigma == cv_SVM$bestTune[,"sigma"])
+ cv_SVM$results %>% filter (C == cv_SVM$bestTune[,"C"] & sigma == cv_SVM$bestTune[,"sigma"])
+ 
+roc_SVM = roc(as.numeric(cv_SVM$trainingData$.outcome=='X1'),aggregate(X1~rowIndex,best_model_SVM,mean)[,'X1'],
+            smoothed = TRUE,
+            # arguments for ci
+            ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+            # arguments for plot
+            plot=TRUE, 
+            auc.polygon=TRUE,
+            max.auc.polygon=TRUE,
+            grid=TRUE,
+            print.auc=TRUE,
+            show.thres=TRUE,
+            print.thres="best",
+            main = "SVM"
+            )
+
+```
+Si enfrentamos todos los valores en una mísma gráfica podemos observar que el mejor modelo  como norma general sería **Random-Forest**.
+
+```{r comparative_roc}
+
+g <-ggroc(list(Logistic = roc_logit, RandomForest = roc_RF, SVM= roc_SVM)) +
+  ggtitle("Logistic vs RandomForest vs SVM")
+  
+g
+```
+
+El modelo **logístico** en esta grafica vemos que es muy similar al **Random-Forest**, pero es algo peor tanto con esta gráfica como con los valores medios de nuestras medidas de ROC, Sensibilidad y Especificidad. 
+
+Tambiéns se puede observar que si queremos que nuestro modelo catalogáse mejor los casos de supervivencia (Sensibilidad),  hay un corte del umbral donde el modelo de *SVM* es mucho mejor, como también vimos chequando las medias de la medias. 
+Con esta gráfica se ve en la esquina azul que además es el mejor umbral que obteníamos en el modelo *SVM*.
+Este modelo podría ser mejor con dicho umbral en el caso que quisieramos catalogar mejor los supervivientes, pero no nos importante catalogar con mayor porcentajes de error los que no sobreviven.
+
 
 # Resolución del problema
+
+Como en nuestro caso, queremos catalogar correctamente el mayor número posible, optaríamos por la opción del modelo de *RandomForest* y  utilizaríamos el mejor umbral detectado.
+
+```{r submission}
+# Seleccionamos el mejor umbral 
+best_threshold <- coords(roc_RF, "best", ret = "threshold", transpose=TRUE)
+
+# Preparamos los datos para la predicción
+
+submission_RF<- submission[c(properties, "Survived")]
+
+# Convertimos las variables para factores que funcione en train
+submission_RF$Survived <- make.names(submission_RF$Survived,  unique = FALSE)
+
+submission_RF$Pclass <- make.names(submission_RF$Pclass,  unique = FALSE)
+
+output_prob <- predict(cv_RF, newdata = submission_RF ,  type = "prob")
+
+# Asignamos los resultado con el mejor umbral.
+
+submission_RF<- cbind(submission_RF, output_prob)
+submission_RF$Survived <- 0
+submission_RF$Survived[submission_RF$X1 >= best_threshold]<- 1
+submission_RF$PassengerId <- as.numeric(rownames(submission_RF))
+head(submission_RF[c("PassengerId", "Survived")])
+write.csv(submission_RF[c("PassengerId", "Survived")], 
+          file = "kaggle/output_submission.csv", 
+          row.names = FALSE)
+
+
+# Salida con las varriables utilizada en los modelos y el resultado
+train$type <- "train"
+submission_RF$type <- "result"
+
+output <- rbind(train[c("Survived", "Pclass", "Title",  "Embarked", "FamilyType", "AgeType", "Fare_per_person", "type")], 
+                submission_RF[c("Survived", "Pclass", "Title",  "Embarked", "FamilyType", "AgeType", "Fare_per_person", "type")] )
+output$PassengerId <- as.numeric(rownames(output))
+
+write.csv(output, file= "kaggle/output.csv")
+
+```
+
+
 # Código
  
 El código se encuentra disponible en
@@ -950,6 +1297,7 @@ El código se encuentra disponible en
 
 # Dataset
 
+El dataset se puede conseguir en [https://www.kaggle.com/c/titanic/data](https://www.kaggle.com/c/titanic/data)
 
 # Contribuciones
 
